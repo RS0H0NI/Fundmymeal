@@ -33,12 +33,16 @@ RUN npm install
 # Copy backend server
 COPY api/server.js .
 
+# Copy Firebase credentials
+COPY api/service-account.json .
+
 # Copy built React frontend from previous stage
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=8080
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/api/service-account.json
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
