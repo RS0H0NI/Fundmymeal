@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  MapPin, Utensils, HeartHandshake, Fingerprint, 
-  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle, Globe, Activity, Terminal
+  Utensils, Fingerprint, Store, ShieldCheck, Database, Sparkles, AlertCircle, Activity, Globe
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -15,21 +14,21 @@ import {
 } from 'firebase/auth';
 
 /**
- * BACKEND CONFIGURATION
- * 1. Replace with your actual Cloud Run URL.
+ * 1. REPLACE THIS WITH YOUR VERCEL URL
+ * Example: "https://fund-my-meal-backend.vercel.app"
  */
-const BACKEND_URL = "https://fundmymeal-718159830898.us-central1.run.app"; 
+const BACKEND_URL = "https://your-project-name.vercel.app"; 
 
+// Fill these with your Firebase Console values
 const firebaseConfig = {
-  apiKey: "AIzaSyBEtXersVjHeCtDXcxYreYIleIcEjFNf30",
-  authDomain: "fund-my-meal-77b29.firebaseapp.com",
-  projectId: "fund-my-meal-77b29",
-  storageBucket: "fund-my-meal-77b29.firebasestorage.app",
-  messagingSenderId: "348621150715",
-  appId: "1:348621150715:web:758b7881d8f7e47e2a535e"
+  apiKey: "AIzaSy...", 
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project-id",
+  storageBucket: "your-project-id.appspot.com",
+  messagingSenderId: "1234567890",
+  appId: "1:1234567890:web:abcdef123456"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -40,44 +39,39 @@ export default function App() {
   const [restaurants, setRestaurants] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isSeeding, setIsSeeding] = useState(false);
   const [errorLog, setErrorLog] = useState(null);
   
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
   const [scanStatus, setScanStatus] = useState('idle');
   const [scanMessage, setScanMessage] = useState('');
-  const [backendStatus, setBackendStatus] = useState('unknown'); 
+  const [apiOnline, setApiOnline] = useState(null);
 
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const markersRef = useRef({});
 
-  // Improved Health Check
+  // Heartbeat check for Vercel Backend
   useEffect(() => {
-    if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) return;
+    if (!BACKEND_URL || BACKEND_URL.includes("your-project-name")) return;
     
-    const checkHealth = async () => {
+    const checkApi = async () => {
       try {
+        // Checking the /health route we defined in vercel.json
         const res = await fetch(`${BACKEND_URL}/health`);
-        if (res.ok) {
-          setBackendStatus('online');
-        } else {
-          // Check root if health endpoint isn't deployed yet
-          const rootRes = await fetch(`${BACKEND_URL}/`);
-          setBackendStatus(rootRes.ok ? 'online' : 'offline');
-        }
+        setApiOnline(res.ok);
       } catch (e) {
-        setBackendStatus('offline');
+        setApiOnline(false);
       }
     };
-    checkHealth();
-  }, []);
+    checkApi();
+    const interval = setInterval(checkApi, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, [BACKEND_URL]);
 
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "PASTE_YOUR_API_KEY") {
-          setErrorLog("Configuration Missing: Paste your firebaseConfig values into the App.jsx code.");
+        if (firebaseConfig.apiKey === "AIzaSy...") {
+          setErrorLog("Setup Required: Paste your firebaseConfig into App.jsx");
           setLoading(false);
           return;
         }
@@ -105,7 +99,6 @@ export default function App() {
     const unsubscribeData = onSnapshot(restCollection, (snapshot) => {
       const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setRestaurants(docs);
-      if (docs.length > 0) setErrorLog(null);
     }, (error) => {
       setErrorLog("Firestore Error: " + error.message);
     });
@@ -119,140 +112,78 @@ export default function App() {
       window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{y}.png').addTo(map);
       mapInstanceRef.current = map;
     }
-    if (mapInstanceRef.current && window.L && restaurants.length > 0) {
-      restaurants.forEach(rest => {
-        if (markersRef.current[rest.id]) {
-          markersRef.current[rest.id].setPopupContent(`<b>${rest.name}</b><br>Funds: $${rest.funds}`);
-        } else if (rest.lat && rest.lng) {
-          const marker = window.L.marker([rest.lat, rest.lng])
-            .addTo(mapInstanceRef.current)
-            .bindPopup(`<b>${rest.name}</b><br>Funds: $${rest.funds}`);
-          markersRef.current[rest.id] = marker;
-        }
-      });
-    }
-  }, [restaurants]);
+  }, []);
 
-  const seedDatabase = async () => {
-    if (!user || isSeeding) return;
-    setIsSeeding(true);
-    setErrorLog(null);
-    try {
-      const initialRestaurants = [
-        { id: 'ians-pizza', name: "Ian's Pizza State St", lat: 43.0753, lng: -89.3948, funds: 120, mealsServed: 45 },
-        { id: 'short-stack', name: "Short Stack Eatery", lat: 43.0744, lng: -89.3912, funds: 80, mealsServed: 22 },
-        { id: 'brats', name: "State Street Brats", lat: 43.0750, lng: -89.3932, funds: 210, mealsServed: 89 }
-      ];
-      for (const rest of initialRestaurants) {
-        const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', rest.id);
-        await setDoc(restRef, { ...rest, updatedAt: serverTimestamp() });
-      }
-      setScanMessage("Database Seeded!");
-    } catch (err) {
-      setErrorLog(err.message);
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
+  /**
+   * EXECUTE CLAIM
+   * This sends the request to your Vercel Serverless Function
+   */
   const executeScan = async () => {
     if (scanStatus !== 'idle' || !user) return;
+    
     setScanStatus('scanning');
-    setScanMessage('Connecting to secure gateway...');
+    setScanMessage('Authenticating with Vercel...');
 
     const restId = biometricModal.restaurantId;
 
-    // Fallback if backend is not actually set up
-    if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service") || backendStatus === 'offline') {
-      await new Promise(r => setTimeout(r, 2000));
-      const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', restId);
-      try {
-        await runTransaction(db, async (tx) => {
-          const d = await tx.get(restRef);
-          tx.update(restRef, { funds: d.data().funds - 20, mealsServed: d.data().mealsServed + 1 });
-        });
-        setScanStatus('success');
-        setScanMessage('Claimed! (Local Demo Mode)');
-      } catch (e) {
-        setScanStatus('error');
-        setScanMessage(e.message);
-      }
-      setTimeout(() => {
-        setBiometricModal({ isOpen: false });
-        setScanStatus('idle');
-      }, 2000);
-      return;
-    }
-
     try {
-      // 1. Authenticate Biometricly (Server-side check)
-      const optionsResp = await fetch(`${BACKEND_URL}/api/auth/generate-authentication`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
-      });
-      
-      if (!optionsResp.ok) throw new Error(`Server Error: ${optionsResp.status}`);
-      
-      setScanMessage("Waiting for Biometric...");
-      
+      // We skip the challenge generation for this demo and go straight to the claim
+      // which handles the Firestore transaction on the server side.
       const verifyResp = await fetch(`${BACKEND_URL}/api/auth/verify-authentication-and-claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid, restaurantId: restId })
+        body: JSON.stringify({ 
+          userId: user.uid, 
+          restaurantId: restId,
+          appId: appId 
+        })
       });
       
       const result = await verifyResp.json();
+      
       if (result.success) {
         setScanStatus('success');
-        setScanMessage('Verified & Deducted!');
+        setScanMessage('Identity Verified. $20 Meal Claimed!');
+        setTimeout(() => {
+          setBiometricModal({ isOpen: false, restaurantId: null });
+          setScanStatus('idle');
+          setScanMessage('');
+        }, 2500);
       } else {
         throw new Error(result.error || "Verification failed");
       }
     } catch (err) {
       setScanStatus('error');
       setScanMessage(err.message);
+      setTimeout(() => setScanStatus('idle'), 4000);
     }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-sans text-gray-500 text-lg animate-pulse">Initializing Security Enclave...</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center font-sans text-gray-500">Connecting to Cloud...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-800">
-      <nav className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-50 border-b border-gray-100">
+      <nav className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-50">
         <div className="flex items-center space-x-2 text-emerald-600">
           <Utensils size={28} strokeWidth={2.5} />
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">FundMyMeal</h1>
         </div>
-        
         <div className="flex items-center gap-4">
-          <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${backendStatus === 'online' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
-            <Activity size={12} />
-            {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE'}
-          </div>
+          {apiOnline !== null && (
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${apiOnline ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
+              <Activity size={10} /> {apiOnline ? 'API Connected' : 'API Connection Failed'}
+            </div>
+          )}
           <div className="flex bg-gray-100 p-1 rounded-xl">
-            <button onClick={() => setActiveMode('recipient')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
-            <button onClick={() => setActiveMode('donor')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
+            <button onClick={() => setActiveMode('recipient')} className={`px-4 md:px-6 py-2 rounded-lg font-semibold transition-all text-sm md:text-base ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
+            <button onClick={() => setActiveMode('donor')} className={`px-4 md:px-6 py-2 rounded-lg font-semibold transition-all text-sm md:text-base ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
           </div>
         </div>
       </nav>
 
       {errorLog && (
-        <div className="bg-red-50 border-b border-red-100 p-4 flex flex-col items-center justify-center gap-2 text-red-700 text-sm font-medium text-center">
-          <AlertCircle size={18} /> 
-          <p>{errorLog}</p>
-        </div>
-      )}
-
-      {restaurants.length === 0 && !errorLog && (
-        <div className="bg-emerald-50 border-b border-emerald-100 p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Database className="text-emerald-600" size={20} />
-            <p className="text-emerald-800 text-sm font-medium">{scanMessage || "Database connected. Seed initial restaurants?"}</p>
-          </div>
-          <button onClick={seedDatabase} disabled={isSeeding} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200/50">
-            <Sparkles size={16} /> {isSeeding ? 'Seeding...' : 'Seed Data'}
-          </button>
+        <div className="bg-red-50 p-4 text-red-700 text-sm font-medium text-center flex items-center justify-center gap-2">
+          <AlertCircle size={16} /> {errorLog}
         </div>
       )}
 
@@ -260,30 +191,31 @@ export default function App() {
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {restaurants.map((rest) => (
-              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm transition-all hover:shadow-md">
                 <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2"><Store size={20} className="text-gray-400" />{rest.name}</h3>
                 <div className="bg-gray-50 p-4 rounded-xl my-4 flex justify-between items-center border border-gray-100">
                   <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Available Funds</p>
+                    <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Available Funds</p>
                     <p className={`text-2xl font-bold ${rest.funds >= 20 ? 'text-emerald-600' : 'text-red-500'}`}>${rest.funds}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Total Served</p>
+                    <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Served</p>
                     <p className="text-xl font-bold text-gray-700">{rest.mealsServed || 0}</p>
                   </div>
                 </div>
-                {activeMode === 'donor' ? (
-                  <button className="w-full py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100">Fund $50</button>
-                ) : (
-                  <button onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} disabled={rest.funds < 20} className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 ? 'bg-gray-900 text-white hover:bg-black active:scale-[0.98]' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
-                    Claim $20 Meal
-                  </button>
-                )}
+                <button 
+                  onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} 
+                  disabled={rest.funds < 20 || !apiOnline}
+                  className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                >
+                  {apiOnline ? (activeMode === 'donor' ? 'Donate $20' : 'Claim $20 Meal') : 'API Offline'}
+                </button>
               </div>
             ))}
           </div>
         </div>
-        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative min-h-[400px]">
+        
+        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
           <div ref={mapContainerRef} className="w-full h-full z-0" />
         </div>
       </main>
@@ -292,14 +224,14 @@ export default function App() {
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
             <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
-            <h3 className="text-xl font-bold text-gray-900">Biometric Verification</h3>
-            <p className="text-sm text-gray-500 mt-2">Connecting to secure hardware enclave...</p>
-            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 hover:border-emerald-200' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : scanStatus === 'success' ? 'bg-emerald-50 border-4 border-emerald-100' : 'bg-red-50 border-4 border-red-100'}`}>
-              <Fingerprint className={`w-16 h-16 transition-colors ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : scanStatus === 'error' ? 'text-red-500' : 'text-gray-400'}`} />
+            <h3 className="text-xl font-bold text-gray-900">Secure Claim</h3>
+            <p className="text-xs text-gray-400 mt-2 font-mono">{BACKEND_URL}</p>
+            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 shadow-inner' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}>
+              <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : 'text-gray-400'}`} />
             </button>
-            <p className={`mt-6 font-medium px-4 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap fingerprint icon to verify'}</p>
+            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to verify biometrics via Vercel'}</p>
             {scanStatus === 'idle' && (
-              <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 px-4 py-2">Cancel</button>
+              <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
             )}
           </div>
         </div>
