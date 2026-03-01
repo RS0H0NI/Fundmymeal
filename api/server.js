@@ -18,10 +18,17 @@ const {
 const admin = require('firebase-admin');
 
 // 1. Initialize Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.applicationDefault() 
-});
-const db = admin.firestore();
+let db = null;
+try {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault() 
+  });
+  db = admin.firestore();
+  console.log('Firebase initialized successfully');
+} catch (error) {
+  console.warn('Firebase initialization failed:', error.message);
+  console.warn('App will run without Firebase functionality');
+}
 
 const app = express();
 
