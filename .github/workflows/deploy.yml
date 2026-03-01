@@ -24,13 +24,19 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Build and push Docker image to ACR
+      - name: Log in to Azure Container Registry
         run: |
-          az acr build \
-            --registry ${{ env.AZURE_CONTAINER_REGISTRY_NAME }} \
-            --image ${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            --image ${{ env.IMAGE_NAME }}:latest \
-            .
+          az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY_NAME }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.CONTAINER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker build -t ${{ env.CONTAINER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:latest .
+
+      - name: Push Docker image to ACR
+        run: |
+          docker push ${{ env.CONTAINER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.CONTAINER_REGISTRY_URL }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Deploy to Container App
         run: |
