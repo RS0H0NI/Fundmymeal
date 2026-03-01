@@ -5,8 +5,11 @@
  * Serves React frontend static files + API
  */
 
+console.log('SERVER STARTING...');
 require('dotenv').config(); 
+console.log('Dotenv loaded');
 const express = require('express');
+console.log('Express loaded');
 const cors = require('cors');
 const path = require('path');
 const { 
@@ -199,6 +202,7 @@ app.get('*', (req, res) => {
 
 // Change the bottom of your file to this:
 const PORT = process.env.PORT || 8080;
+console.log('About to start listening on port', PORT);
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`✅ SERVER RUNNING on port ${PORT}`);
 });
