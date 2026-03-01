@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   MapPin, Utensils, HeartHandshake, Fingerprint, 
-  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle, Globe, Activity
+  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle, Globe, Activity, Terminal
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -16,9 +16,8 @@ import {
 
 /**
  * BACKEND CONFIGURATION
- * 1. Deploy server.js to Cloud Run.
- * 2. If you see "Service Unavailable", check the 'Logs' tab in Cloud Run console.
- * 3. Ensure your package.json has "start": "node server.js".
+ * 1. Replace with your actual Cloud Run URL.
+ * 2. If you see Build Error 20: Ensure your package.json has a "start" script.
  */
 const BACKEND_URL = "https://fundmymeal-718159830898.us-central1.run.app"; 
 
@@ -48,7 +47,7 @@ export default function App() {
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
   const [scanStatus, setScanStatus] = useState('idle');
   const [scanMessage, setScanMessage] = useState('');
-  const [backendStatus, setBackendStatus] = useState('unknown'); // 'online', 'offline', 'unknown'
+  const [backendStatus, setBackendStatus] = useState('unknown'); 
 
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -60,7 +59,6 @@ export default function App() {
     
     const checkHealth = async () => {
       try {
-        // We ping a known endpoint to see if the server responds at all
         const res = await fetch(`${BACKEND_URL}/api/auth/generate-registration`);
         if (res.status === 404 || res.status === 200 || res.status === 400) {
           setBackendStatus('online');
@@ -167,7 +165,6 @@ export default function App() {
 
     const restId = biometricModal.restaurantId;
 
-    // Simulation Fallback if URL is not set
     if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) {
       await new Promise(r => setTimeout(r, 2000));
       const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', restId);
@@ -194,7 +191,6 @@ export default function App() {
       });
       
       if (!optionsResp.ok) {
-        const errorText = await optionsResp.text();
         throw new Error(`Server Error: ${optionsResp.status}. Check Cloud Run logs.`);
       }
       
@@ -234,7 +230,7 @@ export default function App() {
           {backendStatus !== 'unknown' && (
             <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${backendStatus === 'online' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
               <Activity size={12} />
-              {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE (503)'}
+              {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE (Build Error)'}
             </div>
           )}
           <div className="flex bg-gray-100 p-1 rounded-xl">
@@ -243,6 +239,21 @@ export default function App() {
           </div>
         </div>
       </nav>
+
+      {backendStatus === 'offline' && (
+        <div className="bg-amber-50 border-b border-amber-100 p-4">
+          <div className="max-w-4xl mx-auto flex items-start gap-4 text-amber-900 text-sm">
+            <Terminal size={20} className="mt-1 flex-shrink-0" />
+            <div>
+              <p className="font-bold">Build Error 20 Detected: Fixed required in your GitHub Repo</p>
+              <p className="mt-1 opacity-80">The Cloud Buildpack failed because it doesn't know how to start your app. Ensure your <code className="bg-amber-100 px-1 rounded">package.json</code> includes exactly this:</p>
+              <pre className="mt-2 bg-amber-900 text-amber-100 p-3 rounded-lg overflow-x-auto">
+                {`"scripts": {\n  "start": "node server.js"\n}`}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       {errorLog && (
         <div className="bg-red-50 border-b border-red-100 p-4 flex flex-col items-center justify-center gap-2 text-red-700 text-sm font-medium text-center">
