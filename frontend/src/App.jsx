@@ -1,305 +1,318 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   MapPin, Utensils, HeartHandshake, Fingerprint, 
-  CheckCircle2, XCircle, Store, ShieldCheck, User 
+  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle
 } from 'lucide-react';
 
-// 🛑 Dummy Data (Replacing individuals with Restaurants)
-const INITIAL_RESTAURANTS = [
-  { id: 1, name: "Memorial Union Der Rathskeller", lat: 43.0762, lng: -89.4000, funds: 40, mealsServed: 12 },
-  { id: 2, name: "Fresh Madison Market", lat: 43.0735, lng: -89.3955, funds: 15, mealsServed: 34 }, // Less than $20
-  { id: 3, name: "State Street Brats", lat: 43.0747, lng: -89.3921, funds: 120, mealsServed: 8 },
-  { id: 4, name: "Mickies Dairy Bar", lat: 43.0698, lng: -89.4087, funds: 300, mealsServed: 45 }
-];
+// --- Firebase Imports ---
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, collection, doc, onSnapshot, 
+  runTransaction, serverTimestamp, setDoc 
+} from 'firebase/firestore';
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from 'firebase/auth';
+
+/**
+ * MANDATORY CONFIGURATION:
+ * Make sure these values match your project exactly.
+ * You can find these in Project Settings > General > Your Apps in the Firebase Console.
+ */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBEtXersVjHeCtDXcxYreYIleIcEjFNf30",
+  authDomain: "fund-my-meal-77b29.firebaseapp.com",
+  projectId: "fund-my-meal-77b29",
+  storageBucket: "fund-my-meal-77b29.firebasestorage.app",
+  messagingSenderId: "348621150715",
+  appId: "1:348621150715:web:758b7881d8f7e47e2a535e"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'fund-my-meal-v1';
 
 export default function App() {
-  const [activeMode, setActiveMode] = useState('recipient'); // 'recipient' or 'donor'
-  const [restaurants, setRestaurants] = useState(INITIAL_RESTAURANTS);
+  const [activeMode, setActiveMode] = useState('recipient');
+  const [restaurants, setRestaurants] = useState([]);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [errorLog, setErrorLog] = useState(null);
   
-  // Biometric Modal State
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
-  const [scanStatus, setScanStatus] = useState('idle'); // idle, scanning, success, error
-  const [scanMessage, setScanMessage] = useState('Place your thumb on the scanner');
+  const [scanStatus, setScanStatus] = useState('idle');
+  const [scanMessage, setScanMessage] = useState('');
 
-  // Map Refs
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
+  const markersRef = useRef({});
 
-  // 🗺️ Initialize Map
+  // 1. Auth Logic
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (firebaseConfig.apiKey === "AIzaSy...") {
+          setErrorLog("Configuration Missing: Please paste your firebaseConfig values from the Firebase Console into the code.");
+          setLoading(false);
+          return;
+        }
+
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+        if (err.code === 'auth/configuration-not-found') {
+          setErrorLog("Auth Error: You must enable 'Anonymous' authentication in the Firebase Console (Authentication > Sign-in method).");
+        } else {
+          setErrorLog("Authentication failed: " + err.message);
+        }
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // 2. Real-time Firestore Listener
+  useEffect(() => {
+    if (!user) return;
+
+    const restCollection = collection(db, 'artifacts', appId, 'public', 'data', 'restaurants');
+    
+    const unsubscribeData = onSnapshot(restCollection, (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setRestaurants(docs);
+      if (docs.length > 0) setErrorLog(null); // Clear errors if we get data
+    }, (error) => {
+      console.error("Firestore read error:", error);
+      if (error.code === 'permission-denied') {
+        setErrorLog("Permission Denied: Check your Firestore Rules tab.");
+      } else {
+        setErrorLog("Firestore Connection Error: " + error.message);
+      }
+    });
+
+    return () => unsubscribeData();
+  }, [user]);
+
+  // 3. Map Syncing
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    const initMap = () => {
-      if (window.L && !mapInstanceRef.current) {
-        const map = window.L.map(mapContainerRef.current).setView([43.0731, -89.4012], 14);
-        
-        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
-
-        delete window.L.Icon.Default.prototype._getIconUrl;
-        window.L.Icon.Default.mergeOptions({
-          iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-        });
-
-        // Draw markers
-        restaurants.forEach(rest => {
-          const isFunded = rest.funds >= 20;
-          const markerColor = isFunded ? 'green' : 'red';
-          
-          window.L.marker([rest.lat, rest.lng])
-            .addTo(map)
-            .bindPopup(`<b>${rest.name}</b><br>Available Funds: $${rest.funds}`);
-        });
-
-        mapInstanceRef.current = map;
-      }
-    };
-
-    // Dynamically load Leaflet
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link');
-      link.id = 'leaflet-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
+    if (!mapInstanceRef.current && window.L) {
+      const map = window.L.map(mapContainerRef.current).setView([43.0731, -89.4012], 14);
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{y}.png').addTo(map);
+      mapInstanceRef.current = map;
     }
 
-    if (!document.getElementById('leaflet-script')) {
-      const script = document.createElement('script');
-      script.id = 'leaflet-script';
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.onload = initMap;
-      document.head.appendChild(script);
-    } else {
-      initMap();
+    if (mapInstanceRef.current && window.L && restaurants.length > 0) {
+      restaurants.forEach(rest => {
+        if (markersRef.current[rest.id]) {
+          markersRef.current[rest.id].setPopupContent(`<b>${rest.name}</b><br>Funds: $${rest.funds}`);
+        } else if (rest.lat && rest.lng) {
+          const marker = window.L.marker([rest.lat, rest.lng])
+            .addTo(mapInstanceRef.current)
+            .bindPopup(`<b>${rest.name}</b><br>Funds: $${rest.funds}`);
+          markersRef.current[rest.id] = marker;
+        }
+      });
     }
+  }, [restaurants]);
 
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, []); // Empty dependency array so map only loads once
-
-  // 💰 Donor Action: Fund a restaurant
-  const handleFundRestaurant = (id, amount) => {
-    setRestaurants(restaurants.map(rest => 
-      rest.id === id ? { ...rest, funds: rest.funds + amount } : rest
-    ));
-    alert(`Successfully added $${amount} to the restaurant's pool!`);
-  };
-
-  // 🖐️ Recipient Action: Trigger thumbprint modal
-  const triggerThumbprint = (restaurantId) => {
-    setBiometricModal({ isOpen: true, restaurantId });
-    setScanStatus('idle');
-    setScanMessage('Place your thumb on the scanner');
-  };
-
-  // 🔒 Simulate Biometric Scan & Claim Logic
-  const executeScan = () => {
-    if (scanStatus !== 'idle') return;
+  // --- Seed Data Helper ---
+  const seedDatabase = async () => {
+    if (!user || isSeeding) return;
+    setIsSeeding(true);
+    setErrorLog(null);
+    setScanMessage("Testing connection...");
     
-    setScanStatus('scanning');
-    setScanMessage('Verifying biometric signature...');
+    const initialRestaurants = [
+      { id: 'ians-pizza', name: "Ian's Pizza State St", lat: 43.0753, lng: -89.3948, funds: 120, mealsServed: 45 },
+      { id: 'short-stack', name: "Short Stack Eatery", lat: 43.0744, lng: -89.3912, funds: 80, mealsServed: 22 },
+      { id: 'brats', name: "State Street Brats", lat: 43.0750, lng: -89.3932, funds: 210, mealsServed: 89 },
+      { id: 'med-cafe', name: "Mediterranean Cafe", lat: 43.0742, lng: -89.3955, funds: 15, mealsServed: 34 }
+    ];
 
-    setTimeout(() => {
-      const rest = restaurants.find(r => r.id === biometricModal.restaurantId);
+    try {
+      // Step A: Test Write
+      const testRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', '_connection_test');
+      await setDoc(testRef, { test: true, time: Date.now(), user: user.uid });
       
-      if (rest.funds >= 20) {
-        // Success: Deduct $20
-        setRestaurants(restaurants.map(r => 
-          r.id === rest.id ? { ...r, funds: r.funds - 20, mealsServed: r.mealsServed + 1 } : r
-        ));
-        setScanStatus('success');
-        setScanMessage('Identity verified! $20 meal claimed.');
-      } else {
-        // Fail: Not enough funds
-        setScanStatus('error');
-        setScanMessage('Insufficient funds at this location.');
+      setScanMessage("Writing restaurant data...");
+
+      // Step B: Seed
+      for (const rest of initialRestaurants) {
+        const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', rest.id);
+        await setDoc(restRef, {
+          ...rest,
+          status: 'active',
+          updatedAt: serverTimestamp()
+        });
       }
-
-      // Close modal after showing result
-      setTimeout(() => {
-        setBiometricModal({ isOpen: false, restaurantId: null });
-      }, 2500);
-
-    }, 2000); // Simulate 2 second scanning delay
+      
+      setScanMessage("Database ready!");
+      setTimeout(() => setScanMessage(""), 3000);
+      
+    } catch (err) {
+      console.error("Seeding Error:", err);
+      setErrorLog(err.message);
+      if (err.code === 'permission-denied') {
+        setErrorLog("Write Denied. Did you set Firestore Rules to 'Test Mode'?");
+      } else if (err.message.includes("network")) {
+        setErrorLog("Network Error. Check your internet or Firebase Config.");
+      }
+    } finally {
+      setIsSeeding(false);
+    }
   };
+
+  const handleFundRestaurant = async (id, amount) => {
+    if (!user) return;
+    const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', id);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const restDoc = await transaction.get(restRef);
+        if (!restDoc.exists()) throw "Restaurant does not exist!";
+        const newFunds = (restDoc.data().funds || 0) + amount;
+        transaction.update(restRef, { funds: newFunds });
+      });
+    } catch (e) {
+      setErrorLog("Transaction failed: " + e.message);
+    }
+  };
+
+  const executeScan = async () => {
+    if (scanStatus !== 'idle' || !user) return;
+    setScanStatus('scanning');
+    setScanMessage('Authenticating...');
+    const restId = biometricModal.restaurantId;
+    const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', restId);
+    const claimRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'claims'));
+
+    try {
+      await new Promise(r => setTimeout(r, 1000));
+      await runTransaction(db, async (transaction) => {
+        const restDoc = await transaction.get(restRef);
+        const data = restDoc.data();
+        if (data.funds < 20) throw "Insufficient funds.";
+        transaction.update(restRef, { 
+          funds: data.funds - 20,
+          mealsServed: (data.mealsServed || 0) + 1
+        });
+        transaction.set(claimRef, { restaurantId: restId, timestamp: serverTimestamp(), amount: 20 });
+      });
+      setScanStatus('success');
+      setScanMessage('Claim Successful!');
+      setTimeout(() => setBiometricModal({ isOpen: false, restaurantId: null }), 1500);
+    } catch (err) {
+      setScanStatus('error');
+      setScanMessage(err.toString());
+      setTimeout(() => setScanStatus('idle'), 3000);
+    }
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center font-sans text-gray-500">Connecting to Firebase...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-800">
-      
-      {/* 🧭 Navbar */}
       <nav className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-50">
         <div className="flex items-center space-x-2 text-emerald-600">
           <Utensils size={28} strokeWidth={2.5} />
-          <h1 className="text-2xl font-bold tracking-tight">FundMyMeal</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">FundMyMeal</h1>
         </div>
-        
-        {/* Mode Toggle */}
         <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button 
-            onClick={() => setActiveMode('recipient')}
-            className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            I need a meal
-          </button>
-          <button 
-            onClick={() => setActiveMode('donor')}
-            className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            I want to fund
-          </button>
+          <button onClick={() => setActiveMode('recipient')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
+          <button onClick={() => setActiveMode('donor')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
         </div>
       </nav>
 
-      {/* 🎯 Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Column: Feed */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900">
-              {activeMode === 'donor' ? 'Fund a Local Restaurant' : 'Claim a Meal'}
-            </h2>
-            <p className="text-gray-500 mt-2 text-lg">
-              {activeMode === 'donor' 
-                ? 'Add funds to a restaurant\'s pool. Students in need can claim a $20 meal instantly using just their thumbprint.' 
-                : 'Check in at a participating restaurant to claim a $20 meal credit. No questions asked. Verified securely on your device.'}
-            </p>
+      {/* Error / Status Log */}
+      {errorLog && (
+        <div className="bg-red-50 border-b border-red-100 p-4 flex flex-col items-center justify-center gap-2 text-red-700 text-sm font-medium text-center">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={18} /> 
+            <span className="font-bold uppercase tracking-tight">System Alert</span>
           </div>
+          <p>{errorLog}</p>
+        </div>
+      )}
 
+      {restaurants.length === 0 && !errorLog && (
+        <div className="bg-emerald-50 border-b border-emerald-100 p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Database className="text-emerald-600" size={20} />
+            <p className="text-emerald-800 text-sm font-medium">{scanMessage || "Connection established. Ready to seed database?"}</p>
+          </div>
+          <button onClick={seedDatabase} disabled={isSeeding} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all active:scale-95 shadow-lg shadow-emerald-200/50">
+            {isSeeding ? 'Writing...' : <><Sparkles size={16} /> Seed Initial Data</>}
+          </button>
+        </div>
+      )}
+
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {restaurants.length === 0 && !isSeeding && (
+              <div className="col-span-full py-12 text-center bg-white rounded-2xl border-2 border-dashed border-gray-200">
+                <Store className="mx-auto text-gray-300 mb-4" size={48} />
+                <p className="text-gray-500 font-medium">No restaurants found in database.</p>
+                <p className="text-gray-400 text-sm mt-1">Make sure you have created the Firestore Database and enabled Anonymous Auth.</p>
+              </div>
+            )}
             {restaurants.map((rest) => (
-              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-4">
+              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm transition-all hover:scale-[1.01]">
+                <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2"><Store size={20} className="text-gray-400" />{rest.name}</h3>
+                <div className="bg-gray-50 p-4 rounded-xl my-4 flex justify-between items-center border border-gray-100">
                   <div>
-                    <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2">
-                      <Store size={20} className="text-gray-400" />
-                      {rest.name}
-                    </h3>
-                    <p className="text-sm text-gray-500 flex items-center mt-1">
-                      <MapPin size={14} className="mr-1" /> UW-Madison Campus
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-4 rounded-xl mb-6 flex justify-between items-center border border-gray-100">
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Available Pool</p>
-                    <p className={`text-2xl font-bold ${rest.funds >= 20 ? 'text-emerald-600' : 'text-red-500'}`}>
-                      ${rest.funds}
-                    </p>
+                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Pool</p>
+                    <p className={`text-2xl font-bold ${rest.funds >= 20 ? 'text-emerald-600' : 'text-red-500'}`}>${rest.funds}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Meals Served</p>
-                    <p className="text-xl font-bold text-gray-700">{rest.mealsServed}</p>
+                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-1">Served</p>
+                    <p className="text-xl font-bold text-gray-700">{rest.mealsServed || 0}</p>
                   </div>
                 </div>
-
-                {/* Dynamic Button based on Mode */}
                 {activeMode === 'donor' ? (
-                  <button 
-                    onClick={() => handleFundRestaurant(rest.id, 50)}
-                    className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
-                  >
-                    <HeartHandshake size={20} />
-                    Fund $50
-                  </button>
+                  <button onClick={() => handleFundRestaurant(rest.id, 50)} className="w-full py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm tracking-wide">Fund $50</button>
                 ) : (
-                  <button 
-                    onClick={() => triggerThumbprint(rest.id)}
-                    disabled={rest.funds < 20}
-                    className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-sm ${
-                      rest.funds >= 20 
-                        ? 'bg-gray-900 text-white hover:bg-gray-800' 
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    <Fingerprint size={20} />
-                    {rest.funds >= 20 ? 'Claim $20 Meal' : 'Insufficient Funds'}
+                  <button onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} disabled={rest.funds < 20} className={`w-full py-3 rounded-xl font-bold transition-colors shadow-sm tracking-wide ${rest.funds >= 20 ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                    Claim $20 Meal
                   </button>
                 )}
               </div>
             ))}
           </div>
         </div>
-
-        {/* Right Column: Map Sidebar */}
-        <div className="lg:col-span-1 h-[600px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
-          <div className="absolute top-4 left-4 z-[400] bg-white/95 backdrop-blur-sm px-4 py-2 rounded-lg font-bold text-sm shadow-sm border border-gray-100 text-gray-700 flex items-center gap-2">
-            <MapPin size={16} className="text-emerald-500" />
-            Partner Locations
-          </div>
-          <div ref={mapContainerRef} className="w-full h-full min-h-[500px] z-0" />
+        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative min-h-[400px]">
+          <div ref={mapContainerRef} className="w-full h-full z-0" />
         </div>
-
       </main>
 
-      {/* 🔒 Biometric Thumbprint Modal */}
       {biometricModal.isOpen && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
-            
-            <div className="bg-gray-50 p-6 text-center border-b border-gray-100">
-              <ShieldCheck className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-              <h3 className="text-xl font-bold text-gray-900">Verify Identity</h3>
-              <p className="text-sm text-gray-500 mt-1">Claiming meal at {restaurants.find(r => r.id === biometricModal.restaurantId)?.name}</p>
-            </div>
-            
-            <div className="p-8 text-center flex flex-col items-center">
-              
-              {/* The Thumbprint Scanner Button */}
-              <button 
-                onClick={executeScan}
-                disabled={scanStatus !== 'idle'}
-                className={`relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${
-                  scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 hover:bg-gray-100 cursor-pointer shadow-inner' :
-                  scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100 cursor-wait' :
-                  scanStatus === 'success' ? 'bg-emerald-50 border-4 border-emerald-100' : 
-                  'bg-red-50 border-4 border-red-100'
-                }`}
-              >
-                {scanStatus === 'idle' && <Fingerprint className="w-16 h-16 text-gray-400" />}
-                
-                {scanStatus === 'scanning' && (
-                  <>
-                    <Fingerprint className="w-16 h-16 text-blue-500 opacity-50" />
-                    <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  </>
-                )}
-                
-                {scanStatus === 'success' && <CheckCircle2 className="w-16 h-16 text-emerald-500" />}
-                
-                {scanStatus === 'error' && <XCircle className="w-16 h-16 text-red-500" />}
-              </button>
-              
-              <p className={`mt-6 font-medium ${
-                scanStatus === 'error' ? 'text-red-600' :
-                scanStatus === 'success' ? 'text-emerald-600' :
-                scanStatus === 'scanning' ? 'text-blue-600 animate-pulse' :
-                'text-gray-600'
-              }`}>
-                {scanMessage}
-              </p>
-            </div>
-            
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
+            <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
+            <h3 className="text-xl font-bold text-gray-900">Verify Identity</h3>
+            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}>
+              <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
+            </button>
+            <p className="mt-6 font-medium text-gray-600">{scanMessage || 'Tap to verify'}</p>
             {scanStatus === 'idle' && (
-              <div className="bg-gray-50 p-4 border-t border-gray-100 flex justify-end">
-                <button 
-                  onClick={() => setBiometricModal({ isOpen: false, restaurantId: null })}
-                  className="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
+              <button onClick={() => setBiometricModal({ isOpen: false, restaurantId: null })} className="mt-4 text-sm font-bold text-gray-400">Cancel</button>
             )}
-            
           </div>
         </div>
       )}
