@@ -1,20 +1,26 @@
 {
-  "name": "fundmymeal",
+  "name": "fund-my-meal-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Secure biometric meal claim backend for Fund My Meal",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^9.0.0",
+    "@simplewebauthn/server": "^9.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "firebase-admin": "^12.0.0"
+    "firebase-admin": "^12.1.0"
   },
-  "keywords": [],
+  "keywords": [
+    "firebase",
+    "webauthn",
+    "biometrics",
+    "charity"
+  ],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "license": "ISC"
 }

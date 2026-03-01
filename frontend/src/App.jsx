@@ -20,6 +20,14 @@ import {
  * You can find these in Project Settings > General > Your Apps in the Firebase Console.
  */
 
+const firebaseConfig = {
+  apiKey: "AIzaSyBEtXersVjHeCtDXcxYreYIleIcEjFNf30",
+  authDomain: "fund-my-meal-77b29.firebaseapp.com",
+  projectId: "fund-my-meal-77b29",
+  storageBucket: "fund-my-meal-77b29.firebasestorage.app",
+  messagingSenderId: "348621150715",
+  appId: "1:348621150715:web:758b7881d8f7e47e2a535e"
+};
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
