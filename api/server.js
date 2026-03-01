@@ -125,10 +125,15 @@ app.post('/api/auth/register-biometric', async (req, res) => {
 });
 
 app.post('/api/auth/verify-and-claim', async (req, res) => {
-  const { userId, restaurantId, biometricKey } = req.body;
+  const { userId, restaurantId, biometricKey, amount } = req.body;
 
-  if (!userId || !restaurantId || !biometricKey) {
+  if (!userId || !restaurantId || !biometricKey || !amount) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const claimAmount = Number(amount);
+  if (isNaN(claimAmount) || claimAmount < 1 || claimAmount > 20) {
+    return res.status(400).json({ error: 'Invalid claim amount. Must be between $1 and $20.' });
   }
 
   try {
@@ -160,15 +165,15 @@ app.post('/api/auth/verify-and-claim', async (req, res) => {
       if (!restDoc.exists) throw new Error('Restaurant not found');
 
       const currentFunds = restDoc.data().funds || 0;
-      if (currentFunds < 20) throw new Error('Insufficient funds');
+      if (currentFunds < claimAmount) throw new Error('Insufficient funds');
 
       t.update(restRef, {
-        funds: currentFunds - 20,
+        funds: currentFunds - claimAmount,
         mealsServed: (restDoc.data().mealsServed || 0) + 1
       });
 
       t.set(db.collection('artifacts').doc('fund-my-meal-v1').collection('public').doc('data').collection('transactions').doc(), {
-        userId, restaurantId, amount: 20, date: today, timestamp: admin.firestore.FieldValue.serverTimestamp()
+        userId, restaurantId, amount: claimAmount, date: today, timestamp: admin.firestore.FieldValue.serverTimestamp()
       });
 
       t.update(userRef, { lastClaimDate: today });

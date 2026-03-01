@@ -46,7 +46,7 @@ export default function App() {
 
   const [partnerForm, setPartnerForm] = useState({ name: '', description: '', initialFunds: 0 });
 
-  const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
+  const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null, amount: 20 });
   const [onboardingModal, setOnboardingModal] = useState({ isOpen: false });
   const [donationModal, setDonationModal] = useState({ isOpen: false, restaurantId: null, amount: 20 });
   const [scanStatus, setScanStatus] = useState('idle');
@@ -223,7 +223,8 @@ export default function App() {
         body: JSON.stringify({
           userId: user.uid,
           restaurantId: restId,
-          biometricKey: bioKey
+          biometricKey: bioKey,
+          amount: biometricModal.amount
         })
       });
 
@@ -231,9 +232,9 @@ export default function App() {
 
       if (result.success) {
         setScanStatus('success');
-        setScanMessage('Identity Verified. $20 Meal Claimed!');
+        setScanMessage(`Identity Verified. $${biometricModal.amount} Meal Claimed!`);
         setTimeout(() => {
-          setBiometricModal({ isOpen: false, restaurantId: null });
+          setBiometricModal({ isOpen: false, restaurantId: null, amount: 20 });
           setScanStatus('idle');
           setScanMessage('');
         }, 2500);
@@ -416,11 +417,11 @@ export default function App() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })}
-                      disabled={rest.funds < 20 || !apiOnline}
-                      className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                      onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id, amount: 20 })}
+                      disabled={rest.funds < 1 || !apiOnline}
+                      className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 1 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
                     >
-                      {apiOnline ? 'Claim $20 Meal' : 'API Offline'}
+                      {apiOnline ? 'Claim Meal' : 'API Offline'}
                     </button>
                   )}
                 </div>
@@ -439,7 +440,25 @@ export default function App() {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
             <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
             <h3 className="text-xl font-bold text-gray-900">Secure Claim</h3>
-            <p className="mt-2 text-sm text-gray-500">Upload your Registered Thumbprint Image to verify your identity.</p>
+            <p className="mt-2 text-sm text-gray-500">How much would you like to claim?</p>
+
+            <div className="w-full mt-4 mb-2">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  step="1"
+                  required
+                  value={biometricModal.amount}
+                  onChange={(e) => setBiometricModal({ ...biometricModal, amount: Number(e.target.value) })}
+                  className="w-full pl-8 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-xl font-bold text-center"
+                />
+              </div>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-500 mb-2">Upload your Registered Thumbprint Image to verify your identity.</p>
 
             <input
               type="file"
