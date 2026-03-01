@@ -47,6 +47,7 @@ export default function App() {
 
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
   const [onboardingModal, setOnboardingModal] = useState({ isOpen: false });
+  const [donationModal, setDonationModal] = useState({ isOpen: false, restaurantId: null, amount: 20 });
   const [scanStatus, setScanStatus] = useState('idle');
   const [scanMessage, setScanMessage] = useState('');
   const [apiOnline, setApiOnline] = useState(null);
@@ -237,6 +238,49 @@ export default function App() {
         }, 2500);
       } else {
         throw new Error(result.error || "Verification failed");
+      }
+    } catch (err) {
+      setScanStatus('error');
+      setScanMessage(err.message);
+      setTimeout(() => setScanStatus('idle'), 4000);
+    }
+  };
+
+  /**
+   * EXECUTE DONATION
+   */
+  const handleDonation = async (e) => {
+    e.preventDefault();
+    if (!user || donationModal.amount <= 0) return;
+
+    setScanStatus('scanning');
+    setScanMessage('Processing Payment...');
+
+    try {
+      // Simulate Payment Gateway delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      const resp = await fetch('/api/restaurants/donate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurantId: donationModal.restaurantId,
+          amount: donationModal.amount,
+          donorId: user.uid
+        })
+      });
+
+      const result = await resp.json();
+      if (result.success) {
+        setScanStatus('success');
+        setScanMessage(`Successfully donated $${donationModal.amount}!`);
+        setTimeout(() => {
+          setDonationModal({ isOpen: false, restaurantId: null, amount: 20 });
+          setScanStatus('idle');
+          setScanMessage('');
+        }, 2000);
+      } else {
+        throw new Error(result.error || "Donation failed");
       }
     } catch (err) {
       setScanStatus('error');

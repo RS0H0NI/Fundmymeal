@@ -58,6 +58,52 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// --- RESTAURANT ROUTES ---
+app.post('/api/restaurants/register', async (req, res) => {
+  const { name, description, initialFunds, ownerId } = req.body;
+  if (!name || !ownerId) return res.status(400).json({ error: "Missing required fields" });
+
+  try {
+    const restRef = db.collection('artifacts').doc('fund-my-meal-v1')
+      .collection('public').doc('data').collection('restaurants').doc();
+
+    await restRef.set({
+      name,
+      description: description || '',
+      funds: Number(initialFunds) || 0,
+      mealsServed: 0,
+      ownerId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ success: true, id: restRef.id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/restaurants/donate', async (req, res) => {
+  const { restaurantId, amount, donorId } = req.body;
+  if (!restaurantId || !amount || !donorId) return res.status(400).json({ error: "Missing required fields" });
+
+  try {
+    const restRef = db.collection('artifacts').doc('fund-my-meal-v1')
+      .collection('public').doc('data').collection('restaurants').doc(restaurantId);
+
+    await db.runTransaction(async (t) => {
+      const restDoc = await t.get(restRef);
+      if (!restDoc.exists) throw new Error('Restaurant not found');
+
+      const currentFunds = restDoc.data().funds || 0;
+      t.update(restRef, { funds: currentFunds + Number(amount) });
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- EXISTING WEBAUTHN ROUTES ---
 
 // --- EXISTING WEBAUTHN ROUTES (Replaced with Custom Biometric Simulation) ---
@@ -86,7 +132,8 @@ app.post('/api/auth/verify-and-claim', async (req, res) => {
   }
 
   try {
-    const userDoc = await db.collection('users').doc(userId).get();
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not registered. Please register your thumbprint first.' });
@@ -100,6 +147,12 @@ app.post('/api/auth/verify-and-claim', async (req, res) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
+
+    // Check for 1 claim per day rule
+    if (user.lastClaimDate === today) {
+      return res.status(403).json({ error: 'You have already claimed a meal today. Limit 1 per day.' });
+    }
+
     const restRef = db.collection('artifacts').doc('fund-my-meal-v1').collection('public').doc('data').collection('restaurants').doc(restaurantId);
 
     await db.runTransaction(async (t) => {
@@ -117,6 +170,8 @@ app.post('/api/auth/verify-and-claim', async (req, res) => {
       t.set(db.collection('artifacts').doc('fund-my-meal-v1').collection('public').doc('data').collection('transactions').doc(), {
         userId, restaurantId, amount: 20, date: today, timestamp: admin.firestore.FieldValue.serverTimestamp()
       });
+
+      t.update(userRef, { lastClaimDate: today });
     });
 
     res.json({ success: true });
