@@ -199,10 +199,6 @@ app.get('*', (req, res) => {
 
 // Change the bottom of your file to this:
 const PORT = process.env.PORT || 8080;
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`Local server listening on port ${PORT}`);
-  });
-}
-
-module.exports = app; // CRITICAL FOR VERCEL
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
