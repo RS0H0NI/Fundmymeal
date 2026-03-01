@@ -1,23 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
+import {
   Utensils, Fingerprint, Store, ShieldCheck, Database, Sparkles, AlertCircle, Activity, Globe
 } from 'lucide-react';
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, collection, doc, onSnapshot, 
-  runTransaction, serverTimestamp, setDoc 
+import {
+  getFirestore, collection, doc, onSnapshot,
+  runTransaction, serverTimestamp, setDoc
 } from 'firebase/firestore';
-import { 
-  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+import {
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
 } from 'firebase/auth';
+import { generateBiometricHash } from './utils/biometrics';
 
 /**
  * API calls use relative paths since frontend & backend are on the same server
  * This works whether running locally or deployed on Azure
  */
-const BACKEND_URL = ""; 
+const BACKEND_URL = "";
 
 // Fill these with your Firebase Console values
 const firebaseConfig = {
@@ -41,12 +42,16 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorLog, setErrorLog] = useState(null);
-  
+
+  const [partnerForm, setPartnerForm] = useState({ name: '', description: '', initialFunds: 0 });
+
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
+  const [onboardingModal, setOnboardingModal] = useState({ isOpen: false });
   const [scanStatus, setScanStatus] = useState('idle');
   const [scanMessage, setScanMessage] = useState('');
   const [apiOnline, setApiOnline] = useState(null);
 
+  const fileInputRef = useRef(null);
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
 
@@ -114,32 +119,114 @@ export default function App() {
   }, []);
 
   /**
-   * EXECUTE CLAIM
-   * This sends the request to the backend API
+   * ONBOARD RESTAURANT
    */
-  const executeScan = async () => {
-    if (scanStatus !== 'idle' || !user) return;
-    
+  const handlePartnerRegistration = async (e) => {
+    e.preventDefault();
+    if (!partnerForm.name || !user) return;
+
+    setScanStatus('scanning');
+    setScanMessage('Registering Restaurant...');
+
+    try {
+      const resp = await fetch('/api/restaurants/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...partnerForm,
+          ownerId: user.uid
+        })
+      });
+
+      const result = await resp.json();
+      if (result.success) {
+        setScanStatus('success');
+        setScanMessage('Restaurant Registered Successfully!');
+        setTimeout(() => {
+          setPartnerForm({ name: '', description: '', initialFunds: 0 });
+          setActiveMode('recipient');
+          setScanStatus('idle');
+          setScanMessage('');
+        }, 2000);
+      } else {
+        throw new Error(result.error || "Registration failed");
+      }
+    } catch (err) {
+      setScanStatus('error');
+      setScanMessage(err.message);
+      setTimeout(() => setScanStatus('idle'), 4000);
+    }
+  };
+
+  /**
+   * ONBOARD RECIPIENT
+   * Generates biometric key and registers user with backend
+   */
+  const handleOnboardingUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !user) return;
+
+    setScanStatus('scanning');
+    setScanMessage('Generating Biometric Key...');
+
+    try {
+      const bioKey = await generateBiometricHash(file);
+
+      const resp = await fetch('/api/auth/register-biometric', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid, biometricKey: bioKey })
+      });
+
+      const result = await resp.json();
+      if (result.success) {
+        setScanStatus('success');
+        setScanMessage('Identity Registered Successfully!');
+        setTimeout(() => {
+          setOnboardingModal({ isOpen: false });
+          setScanStatus('idle');
+          setScanMessage('');
+        }, 2000);
+      } else {
+        throw new Error(result.error || "Registration failed");
+      }
+    } catch (err) {
+      setScanStatus('error');
+      setScanMessage(err.message);
+      setTimeout(() => setScanStatus('idle'), 4000);
+    }
+  };
+
+  /**
+   * EXECUTE CLAIM
+   * This sends the request to the backend API with the biometric hash
+   */
+  const executeScan = async (e) => {
+    const file = e.target.files[0];
+    if (!file || scanStatus !== 'idle' || !user) return;
+
     setScanStatus('scanning');
     setScanMessage('Authenticating...');
 
     const restId = biometricModal.restaurantId;
 
     try {
-      // We skip the challenge generation for this demo and go straight to the claim
-      // which handles the Firestore transaction on the server side.
-      const verifyResp = await fetch('/api/auth/verify-authentication-and-claim', {
+      // Generate the same hash from the uploaded image
+      const bioKey = await generateBiometricHash(file);
+
+      // Verify and claim
+      const verifyResp = await fetch('/api/auth/verify-and-claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: user.uid, 
+        body: JSON.stringify({
+          userId: user.uid,
           restaurantId: restId,
-          appId: appId 
+          biometricKey: bioKey
         })
       });
-      
+
       const result = await verifyResp.json();
-      
+
       if (result.success) {
         setScanStatus('success');
         setScanMessage('Identity Verified. $20 Meal Claimed!');
@@ -168,6 +255,14 @@ export default function App() {
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">FundMyMeal</h1>
         </div>
         <div className="flex items-center gap-4">
+          {activeMode === 'recipient' && (
+            <button
+              onClick={() => setOnboardingModal({ isOpen: true })}
+              className="text-xs md:text-sm font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors border border-gray-200 shadow-sm"
+            >
+              Register Thumbprint
+            </button>
+          )}
           {apiOnline !== null && (
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${apiOnline ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
               <Activity size={10} /> {apiOnline ? 'API Connected' : 'API Connection Failed'}
@@ -176,6 +271,7 @@ export default function App() {
           <div className="flex bg-gray-100 p-1 rounded-xl">
             <button onClick={() => setActiveMode('recipient')} className={`px-4 md:px-6 py-2 rounded-lg font-semibold transition-all text-sm md:text-base ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
             <button onClick={() => setActiveMode('donor')} className={`px-4 md:px-6 py-2 rounded-lg font-semibold transition-all text-sm md:text-base ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
+            <button onClick={() => setActiveMode('partner')} className={`px-4 md:px-6 py-2 rounded-lg font-semibold transition-all text-sm md:text-base ${activeMode === 'partner' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Partner</button>
           </div>
         </div>
       </nav>
@@ -186,50 +282,159 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {restaurants.map((rest) => (
-              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm transition-all hover:shadow-md">
-                <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2"><Store size={20} className="text-gray-400" />{rest.name}</h3>
-                <div className="bg-gray-50 p-4 rounded-xl my-4 flex justify-between items-center border border-gray-100">
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Available Funds</p>
-                    <p className={`text-2xl font-bold ${rest.funds >= 20 ? 'text-emerald-600' : 'text-red-500'}`}>${rest.funds}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Served</p>
-                    <p className="text-xl font-bold text-gray-700">{rest.mealsServed || 0}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} 
-                  disabled={rest.funds < 20 || !apiOnline}
-                  className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-                >
-                  {apiOnline ? (activeMode === 'donor' ? 'Donate $20' : 'Claim $20 Meal') : 'API Offline'}
-                </button>
+      {activeMode === 'partner' ? (
+        <main className="flex-1 max-w-3xl w-full mx-auto p-6 mt-8">
+          <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
+            <div className="text-center mb-8">
+              <Store className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900">Partner with FundMyMeal</h2>
+              <p className="text-gray-500 mt-2">Register your restaurant to receive community funds and serve meals to those in need.</p>
+            </div>
+
+            <form onSubmit={handlePartnerRegistration} className="space-y-6">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Restaurant Name</label>
+                <input
+                  type="text"
+                  required
+                  value={partnerForm.name}
+                  onChange={(e) => setPartnerForm({ ...partnerForm, name: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-sm font-medium"
+                  placeholder="e.g. Joe's Diner"
+                />
               </div>
-            ))}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={partnerForm.description}
+                  onChange={(e) => setPartnerForm({ ...partnerForm, description: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-sm font-medium h-24 resize-none"
+                  placeholder="Tell us about the kinds of meals you'll serve..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Initial Donation Funds ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={partnerForm.initialFunds}
+                  onChange={(e) => setPartnerForm({ ...partnerForm, initialFunds: Number(e.target.value) })}
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-sm font-medium"
+                  placeholder="0"
+                />
+                <p className="text-xs text-gray-400 mt-2">You can pre-load your restaurant with funds to hit the ground running!</p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={scanStatus !== 'idle'}
+                className="w-full py-4 rounded-xl font-bold bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200 transition-all flex items-center justify-center gap-2"
+              >
+                {scanStatus === 'scanning' ? (
+                  <span className="animate-pulse">Registering...</span>
+                ) : (
+                  <>Register Restaurant <Globe size={18} /></>
+                )}
+              </button>
+              {scanMessage && (
+                <p className={`text-center text-sm font-semibold ${scanStatus === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {scanMessage}
+                </p>
+              )}
+            </form>
           </div>
-        </div>
-        
-        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
-          <div ref={mapContainerRef} className="w-full h-full z-0" />
-        </div>
-      </main>
+        </main>
+      ) : (
+        <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {restaurants.map((rest) => (
+                <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm transition-all hover:shadow-md">
+                  <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2"><Store size={20} className="text-gray-400" />{rest.name}</h3>
+                  <div className="bg-gray-50 p-4 rounded-xl my-4 flex justify-between items-center border border-gray-100">
+                    <div>
+                      <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Available Funds</p>
+                      <p className={`text-2xl font-bold ${rest.funds >= 20 ? 'text-emerald-600' : 'text-red-500'}`}>${rest.funds}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 font-semibold uppercase mb-1">Served</p>
+                      <p className="text-xl font-bold text-gray-700">{rest.mealsServed || 0}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })}
+                    disabled={rest.funds < 20 || !apiOnline}
+                    className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                  >
+                    {apiOnline ? (activeMode === 'donor' ? 'Donate $20' : 'Claim $20 Meal') : 'API Offline'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
+            <div ref={mapContainerRef} className="w-full h-full z-0" />
+          </div>
+        </main>
+      )}
 
       {biometricModal.isOpen && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
             <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
             <h3 className="text-xl font-bold text-gray-900">Secure Claim</h3>
-            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 shadow-inner' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}>
+            <p className="mt-2 text-sm text-gray-500">Upload your Registered Thumbprint Image to verify your identity.</p>
+
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={executeScan}
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanStatus !== 'idle'}
+              className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 hover:bg-emerald-50 border-4 border-gray-100 hover:border-emerald-200 cursor-pointer shadow-inner' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}
+            >
               <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : 'text-gray-400'}`} />
             </button>
-            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to verify biometrics'}</p>
+            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to upload thumbprint'}</p>
             {scanStatus === 'idle' && (
               <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {onboardingModal.isOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
+            <Sparkles className="w-12 h-12 text-amber-500 mb-3" />
+            <h3 className="text-xl font-bold text-gray-900">Register Identity</h3>
+            <p className="mt-2 text-sm text-gray-500">Upload an image to act as your unique Thumbprint Key.</p>
+
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleOnboardingUpload}
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanStatus !== 'idle'}
+              className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 hover:bg-amber-50 border-4 border-gray-100 hover:border-amber-200 cursor-pointer shadow-inner' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}
+            >
+              <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : 'text-gray-400'}`} />
+            </button>
+            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to upload thumbprint'}</p>
+
+            {scanStatus === 'idle' && (
+              <button onClick={() => setOnboardingModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
             )}
           </div>
         </div>
