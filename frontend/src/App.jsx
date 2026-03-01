@@ -406,13 +406,23 @@ export default function App() {
                       <p className="text-xl font-bold text-gray-700">{rest.mealsServed || 0}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })}
-                    disabled={rest.funds < 20 || !apiOnline}
-                    className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-                  >
-                    {apiOnline ? (activeMode === 'donor' ? 'Donate $20' : 'Claim $20 Meal') : 'API Offline'}
-                  </button>
+                  {activeMode === 'donor' ? (
+                    <button
+                      onClick={() => setDonationModal({ isOpen: true, restaurantId: rest.id, amount: 20 })}
+                      disabled={!apiOnline}
+                      className={`w-full py-3 rounded-xl font-bold transition-all ${apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                    >
+                      {apiOnline ? 'Donate' : 'API Offline'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })}
+                      disabled={rest.funds < 20 || !apiOnline}
+                      className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 && apiOnline ? 'bg-gray-900 text-white hover:bg-black shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                    >
+                      {apiOnline ? 'Claim $20 Meal' : 'API Offline'}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
