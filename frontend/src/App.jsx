@@ -17,18 +17,19 @@ import {
  * 1. REPLACE THIS WITH YOUR VERCEL URL
  * Example: "https://fund-my-meal-backend.vercel.app"
  */
-const BACKEND_URL = "https://your-project-name.vercel.app"; 
+const BACKEND_URL = "https://fund-my-meal-backend.vercel.app"; 
 
 // Fill these with your Firebase Console values
 const firebaseConfig = {
-  apiKey: "AIzaSy...", 
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project-id.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef123456"
+  apiKey: "AIzaSyBEtXersVjHeCtDXcxYreYIleIcEjFNf30",
+  authDomain: "fund-my-meal-77b29.firebaseapp.com",
+  projectId: "fund-my-meal-77b29",
+  storageBucket: "fund-my-meal-77b29.firebasestorage.app",
+  messagingSenderId: "348621150715",
+  appId: "1:348621150715:web:758b7881d8f7e47e2a535e"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
