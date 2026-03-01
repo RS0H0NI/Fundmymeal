@@ -1,2 +1,17 @@
 service-account.json
 .env
+.env.local
+
+# Azure Developer CLI
+.azure/
+!.azure/plan.md
+
+# Setup guides (local only)
+GITHUB_ACTIONS_SETUP.md
+DEPLOYMENT_GUIDE.md
+
+# Local development
+node_modules/
+dist/
+.DS_Store
+*.log

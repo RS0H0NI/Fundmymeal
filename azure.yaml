@@ -1,0 +1,27 @@
+version: 1.0
+metadata:
+  template: fundmymeal-azure
+  description: Full-stack JavaScript app (React + Express) on Azure Container Apps
+
+services:
+  app:
+    project: fundmymeal
+    language: nodejs
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+    build: {}
+    deploy: {}
+
+env:
+  AZURE_LOCATION: centralus
+  AZURE_RESOURCE_GROUP: rg-fundmymeal
+
+vars:
+  RESOURCE_GROUP_NAME: rg-fundmymeal
+  CONTAINER_APP_ENV_NAME: cae-fundmymeal
+  CONTAINER_REGISTRY_NAME: crfundmymeal
+  CONTAINER_IMAGE_NAME: fundmymeal
+  CONTAINER_APP_NAME: app-fundmymeal
+  SERVICE_BIND_AUTH_MYSQL: {}
+  SERVICE_BIND_AUTH_POSTGRES: {}

@@ -2,11 +2,13 @@
  * Fund My Meal - Secure Node.js Backend
  * --------------------------------------
  * Updated with Root and Health routes to fix "Cannot GET /"
+ * Serves React frontend static files + API
  */
 
 require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { 
   generateRegistrationOptions, 
   verifyRegistrationResponse, 
@@ -33,14 +35,15 @@ app.use(cors({
 
 app.use(express.json());
 
-// --- NEW ROUTES TO FIX "CANNOT GET /" ---
+// --- SERVE REACT STATIC FILES ---
+const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendDistPath, { 
+  // Cache static assets
+  maxAge: '1d',
+  etag: false
+}));
 
-// Root Route
-app.get('/', (req, res) => {
-  res.status(200).send('Fund My Meal API is running.');
-});
-
-// Health Check Route
+// --- HEALTH CHECK ROUTE ---
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -179,6 +182,12 @@ app.post('/api/auth/verify-authentication-and-claim', async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
+});
+
+// --- FALLBACK TO REACT APP (SPA routing) ---
+// Serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
 // Change the bottom of your file to this:
