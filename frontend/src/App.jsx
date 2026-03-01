@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   MapPin, Utensils, HeartHandshake, Fingerprint, 
-  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle, Globe
+  CheckCircle2, XCircle, Store, ShieldCheck, Database, Sparkles, AlertCircle, Globe, Activity
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -17,10 +17,11 @@ import {
 /**
  * BACKEND CONFIGURATION
  * 1. Deploy server.js to Cloud Run.
- * 2. If you see "Service Unavailable", check the 'Logs' tab in Cloud Run.
+ * 2. If you see "Service Unavailable", check the 'Logs' tab in Cloud Run console.
  * 3. Ensure your package.json has "start": "node server.js".
  */
-const BACKEND_URL = "https://fundmymeal-718159830898.us-central1.run.app/"; 
+const BACKEND_URL = "https://fundmymeal-718159830898.us-central1.run.app"; 
+
 const firebaseConfig = {
   apiKey: "AIzaSyBEtXersVjHeCtDXcxYreYIleIcEjFNf30",
   authDomain: "fund-my-meal-77b29.firebaseapp.com",
@@ -47,10 +48,31 @@ export default function App() {
   const [biometricModal, setBiometricModal] = useState({ isOpen: false, restaurantId: null });
   const [scanStatus, setScanStatus] = useState('idle');
   const [scanMessage, setScanMessage] = useState('');
+  const [backendStatus, setBackendStatus] = useState('unknown'); // 'online', 'offline', 'unknown'
 
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef({});
+
+  // Check Backend Health
+  useEffect(() => {
+    if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) return;
+    
+    const checkHealth = async () => {
+      try {
+        // We ping a known endpoint to see if the server responds at all
+        const res = await fetch(`${BACKEND_URL}/api/auth/generate-registration`);
+        if (res.status === 404 || res.status === 200 || res.status === 400) {
+          setBackendStatus('online');
+        } else {
+          setBackendStatus('offline');
+        }
+      } catch (e) {
+        setBackendStatus('offline');
+      }
+    };
+    checkHealth();
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -145,6 +167,7 @@ export default function App() {
 
     const restId = biometricModal.restaurantId;
 
+    // Simulation Fallback if URL is not set
     if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) {
       await new Promise(r => setTimeout(r, 2000));
       const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', restId);
@@ -170,7 +193,10 @@ export default function App() {
         body: JSON.stringify({ userId: user.uid })
       });
       
-      if (!optionsResp.ok) throw new Error("Backend unreachable or erroring.");
+      if (!optionsResp.ok) {
+        const errorText = await optionsResp.text();
+        throw new Error(`Server Error: ${optionsResp.status}. Check Cloud Run logs.`);
+      }
       
       const options = await optionsResp.json();
       setScanMessage("Waiting for Biometric...");
@@ -186,7 +212,7 @@ export default function App() {
         setScanStatus('success');
         setScanMessage('Verified & Deducted!');
       } else {
-        throw new Error(result.error);
+        throw new Error(result.error || "Verification failed");
       }
     } catch (err) {
       setScanStatus('error');
@@ -203,9 +229,18 @@ export default function App() {
           <Utensils size={28} strokeWidth={2.5} />
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">FundMyMeal</h1>
         </div>
-        <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button onClick={() => setActiveMode('recipient')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
-          <button onClick={() => setActiveMode('donor')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
+        
+        <div className="flex items-center gap-4">
+          {backendStatus !== 'unknown' && (
+            <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${backendStatus === 'online' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
+              <Activity size={12} />
+              {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE (503)'}
+            </div>
+          )}
+          <div className="flex bg-gray-100 p-1 rounded-xl">
+            <button onClick={() => setActiveMode('recipient')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
+            <button onClick={() => setActiveMode('donor')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
+          </div>
         </div>
       </nav>
 
