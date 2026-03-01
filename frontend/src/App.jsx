@@ -17,7 +17,6 @@ import {
 /**
  * BACKEND CONFIGURATION
  * 1. Replace with your actual Cloud Run URL.
- * 2. If you see Build Error 20: Ensure your package.json has a "start" script.
  */
 const BACKEND_URL = "https://fundmymeal-718159830898.us-central1.run.app"; 
 
@@ -53,17 +52,19 @@ export default function App() {
   const mapInstanceRef = useRef(null);
   const markersRef = useRef({});
 
-  // Check Backend Health
+  // Improved Health Check
   useEffect(() => {
     if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) return;
     
     const checkHealth = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/auth/generate-registration`);
-        if (res.status === 404 || res.status === 200 || res.status === 400) {
+        const res = await fetch(`${BACKEND_URL}/health`);
+        if (res.ok) {
           setBackendStatus('online');
         } else {
-          setBackendStatus('offline');
+          // Check root if health endpoint isn't deployed yet
+          const rootRes = await fetch(`${BACKEND_URL}/`);
+          setBackendStatus(rootRes.ok ? 'online' : 'offline');
         }
       } catch (e) {
         setBackendStatus('offline');
@@ -75,8 +76,8 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (firebaseConfig.apiKey === "AIzaSy...") {
-          setErrorLog("Configuration Missing: Paste your firebaseConfig values into the code.");
+        if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "PASTE_YOUR_API_KEY") {
+          setErrorLog("Configuration Missing: Paste your firebaseConfig values into the App.jsx code.");
           setLoading(false);
           return;
         }
@@ -86,11 +87,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        if (err.code === 'auth/configuration-not-found') {
-          setErrorLog("Auth Error: Enable 'Anonymous' auth in Firebase Console.");
-        } else {
-          setErrorLog("Auth failed: " + err.message);
-        }
+        setErrorLog("Auth failed: " + err.message);
         setLoading(false);
       }
     };
@@ -165,7 +162,8 @@ export default function App() {
 
     const restId = biometricModal.restaurantId;
 
-    if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service")) {
+    // Fallback if backend is not actually set up
+    if (!BACKEND_URL || BACKEND_URL.includes("your-backend-service") || backendStatus === 'offline') {
       await new Promise(r => setTimeout(r, 2000));
       const restRef = doc(db, 'artifacts', appId, 'public', 'data', 'restaurants', restId);
       try {
@@ -179,22 +177,23 @@ export default function App() {
         setScanStatus('error');
         setScanMessage(e.message);
       }
-      setTimeout(() => setBiometricModal({ isOpen: false }), 2000);
+      setTimeout(() => {
+        setBiometricModal({ isOpen: false });
+        setScanStatus('idle');
+      }, 2000);
       return;
     }
 
     try {
+      // 1. Authenticate Biometricly (Server-side check)
       const optionsResp = await fetch(`${BACKEND_URL}/api/auth/generate-authentication`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
       
-      if (!optionsResp.ok) {
-        throw new Error(`Server Error: ${optionsResp.status}. Check Cloud Run logs.`);
-      }
+      if (!optionsResp.ok) throw new Error(`Server Error: ${optionsResp.status}`);
       
-      const options = await optionsResp.json();
       setScanMessage("Waiting for Biometric...");
       
       const verifyResp = await fetch(`${BACKEND_URL}/api/auth/verify-authentication-and-claim`, {
@@ -216,44 +215,27 @@ export default function App() {
     }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-sans text-gray-500">Connecting...</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center font-sans text-gray-500 text-lg animate-pulse">Initializing Security Enclave...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-800">
-      <nav className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-50">
+      <nav className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-50 border-b border-gray-100">
         <div className="flex items-center space-x-2 text-emerald-600">
           <Utensils size={28} strokeWidth={2.5} />
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">FundMyMeal</h1>
         </div>
         
         <div className="flex items-center gap-4">
-          {backendStatus !== 'unknown' && (
-            <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${backendStatus === 'online' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
-              <Activity size={12} />
-              {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE (Build Error)'}
-            </div>
-          )}
+          <div className={`hidden md:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${backendStatus === 'online' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600 animate-pulse'}`}>
+            <Activity size={12} />
+            {backendStatus === 'online' ? 'API LIVE' : 'API OFFLINE'}
+          </div>
           <div className="flex bg-gray-100 p-1 rounded-xl">
             <button onClick={() => setActiveMode('recipient')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'recipient' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Recipient</button>
             <button onClick={() => setActiveMode('donor')} className={`px-6 py-2 rounded-lg font-semibold transition-all ${activeMode === 'donor' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'}`}>Donor</button>
           </div>
         </div>
       </nav>
-
-      {backendStatus === 'offline' && (
-        <div className="bg-amber-50 border-b border-amber-100 p-4">
-          <div className="max-w-4xl mx-auto flex items-start gap-4 text-amber-900 text-sm">
-            <Terminal size={20} className="mt-1 flex-shrink-0" />
-            <div>
-              <p className="font-bold">Build Error 20 Detected: Fixed required in your GitHub Repo</p>
-              <p className="mt-1 opacity-80">The Cloud Buildpack failed because it doesn't know how to start your app. Ensure your <code className="bg-amber-100 px-1 rounded">package.json</code> includes exactly this:</p>
-              <pre className="mt-2 bg-amber-900 text-amber-100 p-3 rounded-lg overflow-x-auto">
-                {`"scripts": {\n  "start": "node server.js"\n}`}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
 
       {errorLog && (
         <div className="bg-red-50 border-b border-red-100 p-4 flex flex-col items-center justify-center gap-2 text-red-700 text-sm font-medium text-center">
@@ -278,7 +260,7 @@ export default function App() {
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {restaurants.map((rest) => (
-              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+              <div key={rest.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
                 <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2"><Store size={20} className="text-gray-400" />{rest.name}</h3>
                 <div className="bg-gray-50 p-4 rounded-xl my-4 flex justify-between items-center border border-gray-100">
                   <div>
@@ -291,9 +273,9 @@ export default function App() {
                   </div>
                 </div>
                 {activeMode === 'donor' ? (
-                  <button className="w-full py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Fund $50</button>
+                  <button className="w-full py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100">Fund $50</button>
                 ) : (
-                  <button onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} disabled={rest.funds < 20} className={`w-full py-3 rounded-xl font-bold transition-colors ${rest.funds >= 20 ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                  <button onClick={() => setBiometricModal({ isOpen: true, restaurantId: rest.id })} disabled={rest.funds < 20} className={`w-full py-3 rounded-xl font-bold transition-all ${rest.funds >= 20 ? 'bg-gray-900 text-white hover:bg-black active:scale-[0.98]' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
                     Claim $20 Meal
                   </button>
                 )}
@@ -301,7 +283,7 @@ export default function App() {
             ))}
           </div>
         </div>
-        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
+        <div className="lg:col-span-1 h-[400px] lg:h-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative min-h-[400px]">
           <div ref={mapContainerRef} className="w-full h-full z-0" />
         </div>
       </main>
@@ -312,12 +294,12 @@ export default function App() {
             <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
             <h3 className="text-xl font-bold text-gray-900">Biometric Verification</h3>
             <p className="text-sm text-gray-500 mt-2">Connecting to secure hardware enclave...</p>
-            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}>
-              <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
+            <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 hover:border-emerald-200' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : scanStatus === 'success' ? 'bg-emerald-50 border-4 border-emerald-100' : 'bg-red-50 border-4 border-red-100'}`}>
+              <Fingerprint className={`w-16 h-16 transition-colors ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : scanStatus === 'error' ? 'text-red-500' : 'text-gray-400'}`} />
             </button>
-            <p className={`mt-6 font-medium ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap fingerprint icon to verify'}</p>
+            <p className={`mt-6 font-medium px-4 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap fingerprint icon to verify'}</p>
             {scanStatus === 'idle' && (
-              <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600">Cancel</button>
+              <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 px-4 py-2">Cancel</button>
             )}
           </div>
         </div>

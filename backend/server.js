@@ -1,118 +1,187 @@
+/**
+ * Fund My Meal - Secure Node.js Backend
+ * --------------------------------------
+ * Updated with Root and Health routes to fix "Cannot GET /"
+ */
+
+require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
+const { 
+  generateRegistrationOptions, 
+  verifyRegistrationResponse, 
+  generateAuthenticationOptions, 
+  verifyAuthenticationResponse 
+} = require('@simplewebauthn/server');
 const admin = require('firebase-admin');
-const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 
-// Initialize Firebase Admin
-// On Cloud Run, this automatically uses the default service account
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault()
-  });
-}
-
+// 1. Initialize Firebase Admin
+admin.initializeApp({
+  credential: admin.credential.applicationDefault() 
+});
 const db = admin.firestore();
+
 const app = express();
 
-app.use(cors());
+// Configure CORS to allow your frontend
+const origin = process.env.ORIGIN || '*';
+app.use(cors({
+  origin: origin,
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
+
 app.use(express.json());
 
-// --- CONFIGURATION ---
-const RP_ID = process.env.RP_ID || 'localhost';
-const ORIGIN = process.env.ORIGIN || 'http://localhost:5173';
-const EXPECTED_RP_ID = RP_ID;
+// --- NEW ROUTES TO FIX "CANNOT GET /" ---
 
-// --- ROUTES ---
-
-// 1. Root Route (Fixes "Cannot GET /")
+// Root Route
 app.get('/', (req, res) => {
-  res.status(200).send({
-    status: "online",
-    message: "Fund My Meal API is running",
-    endpoints: ["/api/auth/generate-registration", "/api/auth/generate-authentication"]
-  });
+  res.status(200).send('Fund My Meal API is running.');
 });
 
-// 2. WebAuthn: Generate Registration Options
-app.post('/api/auth/generate-registration', async (req, res) => {
-  const { userId, userName } = req.body;
-  
-  // In a real app, store the current challenge in a DB associated with the user session
-  const options = generateRegistrationOptions({
-    rpName: 'Fund My Meal',
-    rpID: EXPECTED_RP_ID,
-    userID: userId,
-    userName: userName || userId,
-    attestationType: 'none',
-    authenticatorSelection: {
-      residentKey: 'preferred',
-      userVerification: 'preferred',
-      authenticatorAttachment: 'platform', // Force TouchID/FaceID/Windows Hello
-    },
-  });
-
-  res.send(options);
+// Health Check Route
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 3. WebAuthn: Verify and Claim Meal
-// This combines Biometric verification with the Firestore Transaction
-app.post('/api/auth/verify-authentication-and-claim', async (req, res) => {
-  const { userId, restaurantId, body, appId = 'fund-my-meal-v1' } = req.body;
+// --- EXISTING WEBAUTHN ROUTES ---
 
+const rpName = process.env.RP_NAME || 'Fund My Meal';
+const rpID = process.env.RP_ID || 'localhost';
+
+app.get('/api/auth/generate-registration', async (req, res) => {
   try {
-    // A. Verify Biometric (Simplified for demo - in production use simplewebauthn verify)
-    // We assume the biometric check passed if we reached this logic from a trusted client
-    
-    // B. Execute Firestore Transaction
-    // Path: /artifacts/{appId}/public/data/restaurants/{restaurantId}
-    const restaurantRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('restaurants').doc(restaurantId);
-    const claimRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('claims').doc();
-
-    const result = await db.runTransaction(async (t) => {
-      const doc = await t.get(restaurantRef);
-      if (!doc.exists) throw new Error('Restaurant not found');
-      
-      const data = doc.data();
-      if (data.funds < 20) throw new Error('Insufficient funds at this location');
-
-      // Update Restaurant
-      t.update(restaurantRef, {
-        funds: data.funds - 20,
-        mealsServed: (data.mealsServed || 0) + 1,
-        lastClaimedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      // Log Claim
-      t.set(claimRef, {
-        userId,
-        restaurantId,
-        amount: 20,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      return { success: true };
+    const userId = `usr_${Math.random().toString(36).substring(2, 9)}`;
+    const options = await generateRegistrationOptions({
+      rpName,
+      rpID,
+      userID: userId,
+      userName: `recipient_${userId}@fundmymeal.app`,
+      attestationType: 'none',
+      authenticatorSelection: {
+        residentKey: 'required',
+        userVerification: 'required',
+      },
     });
 
-    res.send(result);
+    await db.collection('challenges').doc(userId).set({
+      challenge: options.challenge,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ options, userId });
   } catch (error) {
-    console.error('Transaction failed:', error);
-    res.status(400).send({ success: false, error: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 4. Authentication Options (Login/Verification)
-app.post('/api/auth/generate-authentication', async (req, res) => {
-  const options = generateAuthenticationOptions({
-    rpID: EXPECTED_RP_ID,
-    userVerification: 'preferred',
-  });
-  res.send(options);
+app.post('/api/auth/verify-registration', async (req, res) => {
+  const { userId, response } = req.body;
+  const challengeDoc = await db.collection('challenges').doc(userId).get();
+  
+  if (!challengeDoc.exists) return res.status(400).json({ error: "Challenge expired" });
+  
+  const expectedChallenge = challengeDoc.data().challenge;
+
+  try {
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge,
+      expectedOrigin: origin,
+      expectedRPID: rpID,
+    });
+
+    if (verification.verified) {
+      const { registrationInfo } = verification;
+      await db.collection('users').doc(userId).set({
+        id: userId,
+        credentialID: Buffer.from(registrationInfo.credentialID).toString('base64'),
+        credentialPublicKey: Buffer.from(registrationInfo.credentialPublicKey).toString('base64'),
+        counter: registrationInfo.counter,
+        enrolledAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ success: true });
+    }
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
-// START SERVER
+app.post('/api/auth/generate-authentication', async (req, res) => {
+  const { userId } = req.body;
+  const userDoc = await db.collection('users').doc(userId).get();
+  
+  if (!userDoc.exists) return res.status(404).json({ error: 'User not enrolled' });
+  const user = userDoc.data();
+
+  const options = await generateAuthenticationOptions({
+    rpID,
+    allowCredentials: [{
+      id: Buffer.from(user.credentialID, 'base64'),
+      type: 'public-key',
+    }],
+    userVerification: 'required',
+  });
+
+  await db.collection('challenges').doc(userId).set({ challenge: options.challenge });
+  res.json(options);
+});
+
+app.post('/api/auth/verify-authentication-and-claim', async (req, res) => {
+  const { userId, response, restaurantId } = req.body;
+  
+  const userDoc = await db.collection('users').doc(userId).get();
+  const challengeDoc = await db.collection('challenges').doc(userId).get();
+  
+  if (!userDoc.exists || !challengeDoc.exists) {
+    return res.status(400).json({ error: 'Invalid session' });
+  }
+
+  const user = userDoc.data();
+
+  try {
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challengeDoc.data().challenge,
+      expectedOrigin: origin,
+      expectedRPID: rpID,
+      authenticator: {
+        credentialPublicKey: Buffer.from(user.credentialPublicKey, 'base64'),
+        credentialID: Buffer.from(user.credentialID, 'base64'),
+        counter: user.counter,
+      },
+    });
+
+    if (!verification.verified) throw new Error('Unauthorized');
+
+    const today = new Date().toISOString().split('T')[0];
+    const restRef = db.collection('restaurants').doc(restaurantId);
+    
+    await db.runTransaction(async (t) => {
+      const restDoc = await t.get(restRef);
+      if (!restDoc.exists) throw new Error('Restaurant not found');
+      
+      const currentFunds = restDoc.data().funds;
+      if (currentFunds < 20) throw new Error('Insufficient funds');
+
+      t.update(restRef, { 
+        funds: currentFunds - 20,
+        mealsServed: (restDoc.data().mealsServed || 0) + 1
+      });
+      
+      t.set(db.collection('transactions').doc(), {
+        userId, restaurantId, amount: 20, date: today, timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-  console.log(`Expecting Origin: ${ORIGIN}`);
-  console.log(`Expecting RP_ID: ${EXPECTED_RP_ID}`);
+  console.log(`Secure Backend running on port ${PORT}`);
 });
