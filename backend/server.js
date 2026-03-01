@@ -181,7 +181,12 @@ app.post('/api/auth/verify-authentication-and-claim', async (req, res) => {
   }
 });
 
+// Change the bottom of your file to this:
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`Secure Backend running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Local server listening on port ${PORT}`);
+  });
+}
+
+module.exports = app; // CRITICAL FOR VERCEL
