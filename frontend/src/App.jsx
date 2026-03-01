@@ -6,13 +6,14 @@ import {
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
 import {
-  getFirestore, collection, doc, onSnapshot,
-  runTransaction, serverTimestamp, setDoc
+  getFirestore, collection, onSnapshot
 } from 'firebase/firestore';
 import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
 } from 'firebase/auth';
 import { generateBiometricHash } from './utils/biometrics';
+
+/* global __app_id, __initial_auth_token */
 
 /**
  * API calls use relative paths since frontend & backend are on the same server
@@ -63,7 +64,7 @@ export default function App() {
         // Checking the /health route
         const res = await fetch('/health');
         setApiOnline(res.ok);
-      } catch (e) {
+      } catch {
         setApiOnline(false);
       }
     };
@@ -479,6 +480,45 @@ export default function App() {
 
             {scanStatus === 'idle' && (
               <button onClick={() => setOnboardingModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {donationModal.isOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
+            <Store className="w-12 h-12 text-blue-500 mb-3" />
+            <h3 className="text-xl font-bold text-gray-900">Make a Donation</h3>
+            <p className="mt-2 text-sm text-gray-500">How much would you like to contribute to this restaurant?</p>
+
+            <form onSubmit={handleDonation} className="w-full mt-6 space-y-4">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  value={donationModal.amount}
+                  onChange={(e) => setDonationModal({ ...donationModal, amount: Number(e.target.value) })}
+                  className="w-full pl-8 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-xl font-bold text-center"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={scanStatus !== 'idle'}
+                className={`w-full py-3 rounded-xl font-bold text-white transition-all shadow-lg ${scanStatus === 'idle' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' : 'bg-blue-400 cursor-not-allowed'}`}
+              >
+                {scanStatus === 'scanning' ? 'Processing...' : `Donate $${donationModal.amount}`}
+              </button>
+            </form>
+
+            <p className={`mt-4 font-medium text-sm px-4 h-6 ${scanStatus === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>{scanMessage}</p>
+
+            {scanStatus === 'idle' && (
+              <button onClick={() => setDonationModal({ isOpen: false, restaurantId: null, amount: 20 })} className="mt-2 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
             )}
           </div>
         </div>
