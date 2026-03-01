@@ -14,10 +14,10 @@ import {
 } from 'firebase/auth';
 
 /**
- * 1. REPLACE THIS WITH YOUR VERCEL URL
- * Example: "https://fund-my-meal-backend.vercel.app"
+ * API calls use relative paths since frontend & backend are on the same server
+ * This works whether running locally or deployed on Azure
  */
-const BACKEND_URL = "https://fund-my-meal-backend.vercel.app"; 
+const BACKEND_URL = ""; 
 
 // Fill these with your Firebase Console values
 const firebaseConfig = {
@@ -50,14 +50,12 @@ export default function App() {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
 
-  // Heartbeat check for Vercel Backend
+  // Heartbeat check for Backend
   useEffect(() => {
-    if (!BACKEND_URL || BACKEND_URL.includes("your-project-name")) return;
-    
     const checkApi = async () => {
       try {
-        // Checking the /health route we defined in vercel.json
-        const res = await fetch(`${BACKEND_URL}/health`);
+        // Checking the /health route
+        const res = await fetch('/health');
         setApiOnline(res.ok);
       } catch (e) {
         setApiOnline(false);
@@ -66,7 +64,7 @@ export default function App() {
     checkApi();
     const interval = setInterval(checkApi, 30000); // Check every 30s
     return () => clearInterval(interval);
-  }, [BACKEND_URL]);
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -117,20 +115,20 @@ export default function App() {
 
   /**
    * EXECUTE CLAIM
-   * This sends the request to your Vercel Serverless Function
+   * This sends the request to the backend API
    */
   const executeScan = async () => {
     if (scanStatus !== 'idle' || !user) return;
     
     setScanStatus('scanning');
-    setScanMessage('Authenticating with Vercel...');
+    setScanMessage('Authenticating...');
 
     const restId = biometricModal.restaurantId;
 
     try {
       // We skip the challenge generation for this demo and go straight to the claim
       // which handles the Firestore transaction on the server side.
-      const verifyResp = await fetch(`${BACKEND_URL}/api/auth/verify-authentication-and-claim`, {
+      const verifyResp = await fetch('/api/auth/verify-authentication-and-claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -226,11 +224,10 @@ export default function App() {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center flex flex-col items-center">
             <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3" />
             <h3 className="text-xl font-bold text-gray-900">Secure Claim</h3>
-            <p className="text-xs text-gray-400 mt-2 font-mono">{BACKEND_URL}</p>
             <button onClick={executeScan} disabled={scanStatus !== 'idle'} className={`mt-6 relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${scanStatus === 'idle' ? 'bg-gray-50 border-4 border-gray-100 shadow-inner' : scanStatus === 'scanning' ? 'bg-blue-50 border-4 border-blue-100' : 'bg-emerald-50 border-4 border-emerald-100'}`}>
               <Fingerprint className={`w-16 h-16 ${scanStatus === 'scanning' ? 'text-blue-500 animate-pulse' : scanStatus === 'success' ? 'text-emerald-500' : 'text-gray-400'}`} />
             </button>
-            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to verify biometrics via Vercel'}</p>
+            <p className={`mt-6 font-medium text-sm px-4 h-10 ${scanStatus === 'error' ? 'text-red-500' : 'text-gray-600'}`}>{scanMessage || 'Tap to verify biometrics'}</p>
             {scanStatus === 'idle' && (
               <button onClick={() => setBiometricModal({ isOpen: false })} className="mt-4 text-sm font-bold text-gray-400 hover:text-gray-600 underline underline-offset-4">Cancel</button>
             )}
