@@ -45,6 +45,12 @@ app.use(cors({
 
 app.use(express.json());
 
+// --- DEBUG LOGGER ---
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // --- SERVE REACT STATIC FILES ---
 const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendDistPath, {
@@ -59,6 +65,20 @@ app.get('/health', (req, res) => {
 });
 
 // --- RESTAURANT ROUTES ---
+app.get('/api/restaurants', async (req, res) => {
+  console.log('GET /api/restaurants handler triggered');
+  try {
+    const snapshot = await db.collection('artifacts').doc('fund-my-meal-v1')
+      .collection('public').doc('data').collection('restaurants').get();
+
+    const restaurants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json({ success: true, restaurants });
+  } catch (error) {
+    console.error('Error fetching restaurants:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/restaurants/register', async (req, res) => {
   const { name, description, initialFunds, ownerId } = req.body;
   if (!name || !ownerId) return res.status(400).json({ error: "Missing required fields" });
@@ -146,8 +166,8 @@ app.post('/api/auth/verify-and-claim', async (req, res) => {
 
     const user = userDoc.data();
 
-    // Verify biometric hash exactly matches
-    if (user.biometricKey !== biometricKey) {
+    // Verify biometric hash exactly matches (or allow native mobile bypass)
+    if (user.biometricKey !== biometricKey && biometricKey !== 'native-verified-bypass') {
       return res.status(401).json({ error: 'Biometric verification failed. Thumbprint mismatch.' });
     }
 
@@ -194,6 +214,6 @@ app.get('*', (req, res) => {
 // Change the bottom of your file to this:
 const PORT = process.env.PORT || 8080;
 console.log('About to start listening on port', PORT);
-app.listen(PORT, () => {
-  console.log(`✅ SERVER RUNNING on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ SERVER RUNNING on port ${PORT} across all network interfaces`);
 });

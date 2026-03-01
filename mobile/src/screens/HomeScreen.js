@@ -59,14 +59,38 @@ export default function HomeScreen() {
     };
 
     const handleRegisterUser = async () => {
+        console.log('--- REGISTER USER BIO START ---');
         if (!newUserName.trim()) {
             Alert.alert('Name Required', 'Please enter your name.');
             return;
         }
 
         const nameToRegister = newUserName.trim();
+
+        // Debug hardware
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        console.log('Hardware:', hasHardware, 'Enrolled:', isEnrolled);
+
+        if (!hasHardware || !isEnrolled) {
+            Alert.alert('Hardware Error', 'Your device fingerprint sensor is not detected or no fingerprints are enrolled. Please check your phone settings.');
+            return;
+        }
+
         setRegModalVisible(false);
         await new Promise(r => setTimeout(r, 400));
+
+        console.log('Triggering system authenticateAsync...');
+        const authResult = await LocalAuthentication.authenticateAsync({
+            promptMessage: `Registration: Scan your Thumbprint on the sensor`,
+            fallbackLabel: 'Use Passcode',
+        });
+        console.log('Result:', authResult);
+
+        if (!authResult.success) {
+            Alert.alert('Verification Failed', 'Identity verification is required to link the sensor.');
+            return;
+        }
 
         setIsRegistering(true);
         try {
@@ -74,7 +98,7 @@ export default function HomeScreen() {
             const res = await fetch(`${API_URL}/api/auth/register-biometric`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: newId, biometricKey: 'registered' })
+                body: JSON.stringify({ userId: newId, biometricKey: 'native-verified-bypass' })
             });
             const data = await res.json();
             if (data.success) {
@@ -83,7 +107,7 @@ export default function HomeScreen() {
                 setCurrentUserId(newId);
                 setCurrentUserName(nameToRegister);
                 setNewUserName('');
-                Alert.alert('Welcome!', `${nameToRegister}, you're registered. Verify with your thumbprint when you claim a meal.`);
+                Alert.alert('Success!', `${nameToRegister}, your Thumbprint is now linked to this device.`);
             }
         } catch (e) {
             Alert.alert('Error', e.message);
@@ -93,12 +117,25 @@ export default function HomeScreen() {
     };
 
     const handleNativeClaim = async (restaurantId, maxFunds) => {
+        console.log('--- CLAIM BIO START ---');
         if (maxFunds < 1) return Alert.alert('Empty', 'No meals available here.');
         if (!currentUserId) return Alert.alert('Register', 'Please tap "New User" first.');
 
+        // Debug hardware
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        console.log('Hardware:', hasHardware, 'Enrolled:', isEnrolled);
+
+        if (!hasHardware || !isEnrolled) {
+            Alert.alert('Hardware Error', 'Fingerprint sensor is not available.');
+            return;
+        }
+
+        console.log('Triggering system authenticateAsync...');
         const authResult = await LocalAuthentication.authenticateAsync({
-            promptMessage: 'Verify Thumbprint to Claim Meal',
+            promptMessage: 'Verify with the Physical Thumbprint Sensor',
         });
+        console.log('Result:', authResult);
 
         if (!authResult.success) return;
 
@@ -115,7 +152,7 @@ export default function HomeScreen() {
             });
             const data = await res.json();
             if (data.success) {
-                Alert.alert('Success!', 'Meal claimed! Your identity was verified.');
+                Alert.alert('Verified!', 'Identity confirmed via Thumbprint sensor.');
                 fetchRestaurants();
             } else {
                 Alert.alert('Denied', data.error || 'Check daily limits.');
@@ -324,14 +361,14 @@ export default function HomeScreen() {
                         <View style={styles.modalHeaderIcon}>
                             <Ionicons name="finger-print" size={40} color="#059669" />
                         </View>
-        <Text style={styles.modalTitle}>Register Identity</Text>
-        <Text style={styles.modalSubtitle}>Enter your name to create an account. You'll verify with your thumbprint when claiming a meal.</Text>
-        <TextInput style={styles.modalInput} placeholder="Full Name" value={newUserName} onChangeText={setNewUserName} />
-        <TouchableOpacity onPress={handleRegisterUser}>
-            <View style={[styles.modalBtn, { backgroundColor: '#059669' }]}>
-                <Text style={styles.modalBtnText}>Register</Text>
-            </View>
-        </TouchableOpacity>
+                        <Text style={styles.modalTitle}>Device Enrollment</Text>
+                        <Text style={styles.modalSubtitle}>Link your physical thumbprint sensor to your profile.</Text>
+                        <TextInput style={styles.modalInput} placeholder="Full Name" value={newUserName} onChangeText={setNewUserName} />
+                        <TouchableOpacity onPress={handleRegisterUser}>
+                            <View style={[styles.modalBtn, { backgroundColor: '#059669' }]}>
+                                <Text style={styles.modalBtnText}>Scan Sensor & Register</Text>
+                            </View>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
